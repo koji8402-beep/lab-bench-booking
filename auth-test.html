@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ログイン接続テスト</title><link rel="stylesheet" href="style.css?v=20261027-1"></head>
-<body><header><div class="wrap"><h1>ログイン接続テスト</h1><p>予約データには接続しません</p></div></header><main class="wrap"><section class="card"><p>GoogleアカウントでFirebaseにログインできるか確認します。研究室メンバーの利用許可はまだ設定されていません。</p><button id="login" class="primary">Googleでログイン</button><button id="logout" class="sub" hidden>ログアウト</button><p id="status" role="status">接続を準備しています。</p><p class="muted">名前・メールアドレスはこの画面に表示せず、予約情報の読み書きも行いません。</p><a href="./">試作画面に戻る</a></section></main>
+<body><header><div class="wrap"><h1>ログイン接続テスト</h1><p>予約データには接続しません</p></div></header><main class="wrap"><section class="card"><p>GoogleアカウントでFirebaseにログインできるか確認します。研究室メンバーの利用許可はまだ設定されていません。</p><button id="login" class="primary">Googleでログイン</button><button id="logout" class="sub" hidden>ログアウト</button> <button id="dbtest" class="primary" hidden>データ保存をテスト</button><p id="dbstatus" role="status"></p><p id="status" role="status">接続を準備しています。</p><p class="muted">名前・メールアドレスはこの画面に表示せず、予約情報の読み書きは行いません。データ保存テストでは確認用の文字列を１件保存します。</p><a href="./">試作画面に戻る</a></section></main>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDocFromServer, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
 const app=initializeApp({apiKey:"AIzaSyDn9Z_IBRag_p0DXL_LBS4sBYA7kgDOWsU",authDomain:"lab-bench-booking-test.firebaseapp.com",projectId:"lab-bench-booking-test",storageBucket:"lab-bench-booking-test.firebasestorage.app",messagingSenderId:"1043490879666",appId:"1:1043490879666:web:c34ae106322a04127a71ab"});
 const auth=getAuth(app),status=document.querySelector("#status"),login=document.querySelector("#login"),logout=document.querySelector("#logout");
-onAuthStateChanged(auth,user=>{status.textContent=user?"Googleログインに成功しました。":"まだログインしていません。";login.hidden=!!user;logout.hidden=!user});
+onAuthStateChanged(auth,user=>{status.textContent=user?"Googleログインに成功しました。":"まだログインしていません。";login.hidden=!!user;logout.hidden=!user;document.querySelector("#dbtest").hidden=!user;document.querySelector("#dbstatus").textContent=""});
 login.onclick=async()=>{try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){status.textContent="ログインできませんでした。エラー: "+(e.code||"unknown");}};
 logout.onclick=async()=>{await signOut(auth)};
+document.querySelector("#dbtest").onclick=async()=>{const out=document.querySelector("#dbstatus");out.textContent="接続確認中…";try{const ref=doc(getFirestore(app),"connectivityTests",auth.currentUser.uid);await setDoc(ref,{message:"接続テスト",updatedAt:serverTimestamp()});const snapshot=await getDocFromServer(ref);out.textContent=snapshot.exists()&&snapshot.data().message==="接続テスト"?"データ保存・読込テストに成功しました。":"保存結果を確認できませんでした。"}catch(e){out.textContent="データ保存テストに失敗しました。エラー: "+(e.code||"unknown")}};
 </script></body></html>
