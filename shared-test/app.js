@@ -51,8 +51,19 @@ function openEdit(item){
  for(const k of ['start','end','activity','fixedTime','memo','reason'])form.elements[k].value=item[k]||'';
  form.elements.fixed.checked=!!item.fixed;document.querySelector('#formHeading').textContent='利用希望の時間を変更';document.querySelector('#formSubmit').textContent='変更を保存';document.querySelector('#formName').textContent=displayName();document.querySelector('#error').textContent='';updateForm();formDialog.showModal();
 }
-function updateForm(){const fixed=form.elements.fixed.checked;document.querySelector('#fixedLabel').hidden=!fixed;form.elements.fixedTime.required=fixed;const duration=minutes(form.elements.end.value)-minutes(form.elements.start.value);const long=duration>=120;document.querySelector('#reasonLabel').hidden=!long;form.elements.reason.required=long}
+function updateForm(){
+ const activity=form.elements.activity,selected=activity.value;
+ if(!editingId&&form.elements.equipment.value!=='cabinet'&&['大腸菌操作','レンチウイルスベクター関連'].includes(selected))activity.value='';
+ for(const option of activity.options){
+   const cabinetOnly=['大腸菌操作','レンチウイルスベクター関連'].includes(option.value);
+   const keepExisting=!!editingId&&option.value===selected;
+   const hide=cabinetOnly&&form.elements.equipment.value!=='cabinet'&&!keepExisting;
+   option.hidden=hide;option.disabled=hide;
+ }
+ const fixed=form.elements.fixed.checked;document.querySelector('#fixedLabel').hidden=!fixed;form.elements.fixedTime.required=fixed;const duration=minutes(form.elements.end.value)-minutes(form.elements.start.value);const long=duration>=120;document.querySelector('#reasonLabel').hidden=!long;form.elements.reason.required=long
+}
 form.addEventListener('input',updateForm);
+form.elements.equipment.addEventListener('change',updateForm);
 form.addEventListener('submit',async e=>{
  e.preventDefault();
  const submit=document.querySelector('#formSubmit');
