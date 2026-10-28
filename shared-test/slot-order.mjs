@@ -20,15 +20,18 @@ export function orderForSlot(request,minute) {
 export function equipmentGroup(equipment) {
   return ['either','one','two'].includes(equipment) ? 'culture' : equipment;
 }
+export function sameReservationEquipment(a,b) {
+  return a===b || (equipmentGroup(a)==='culture' && equipmentGroup(b)==='culture' && (a==='either'||b==='either'));
+}
 export function findOverlap(records, candidate) {
   const from=toMinutes(candidate.start), to=toMinutes(candidate.end);
-  return records.find(r=>r.id!==candidate.id && !r.cancelled && r.ownerUid===candidate.ownerUid && r.date===candidate.date && equipmentGroup(r.equipment)===equipmentGroup(candidate.equipment) && toMinutes(r.start)<to && toMinutes(r.end)>from) || null;
+  return records.find(r=>r.id!==candidate.id && !r.cancelled && r.ownerUid===candidate.ownerUid && r.date===candidate.date && sameReservationEquipment(r.equipment,candidate.equipment) && toMinutes(r.start)<to && toMinutes(r.end)>from) || null;
 }
 export function uncoveredIntervals(records,candidate) {
   const start=toMinutes(candidate.start),end=toMinutes(candidate.end);
   let intervals=[[start,end]];
   for(const r of records) {
-    if(r.id===candidate.id||r.cancelled||r.ownerUid!==candidate.ownerUid||r.date!==candidate.date||equipmentGroup(r.equipment)!==equipmentGroup(candidate.equipment))continue;
+    if(r.id===candidate.id||r.cancelled||r.ownerUid!==candidate.ownerUid||r.date!==candidate.date||!sameReservationEquipment(r.equipment,candidate.equipment))continue;
     const a=toMinutes(r.start),b=toMinutes(r.end);
     intervals=intervals.flatMap(([left,right])=>{
       if(b<=left||a>=right)return [[left,right]];

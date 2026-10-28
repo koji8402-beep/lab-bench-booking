@@ -1,4 +1,4 @@
-import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, findOverlap, uncoveredIntervals, visibleAnchor } from './slot-order.mjs?v=20261028-auto-trim';
+import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, sameReservationEquipment, findOverlap, uncoveredIntervals, visibleAnchor } from './slot-order.mjs?v=20261028-equipment-confirm';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import { getFirestore, collection, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, runTransaction, getDocsFromServer, arrayUnion } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
@@ -63,6 +63,8 @@ form.addEventListener('submit',async e=>{
  submit.disabled=true;err.textContent='';
  try{
    const before=await getDocsFromServer(requestsRef);
+   const otherEquipment=before.docs.map(d=>({...d.data(),id:d.id})).filter(r=>r.id!==currentId&&!r.cancelled&&r.ownerUid===uid&&r.date===day&&!sameReservationEquipment(r.equipment,equipment)&&minutes(r.start)<minutes(end)&&minutes(r.end)>minutes(start));
+   if(otherEquipment.length&&!confirm('同じ時間帯に、別の設備の利用希望があります。\n'+otherEquipment.map(r=>`${equipmentNames[r.equipment]||r.equipment}　${r.start}〜${r.end}`).join('\n')+'\n\nこのまま'+(currentId?'変更':'登録')+'しますか？'))return;
    const legacyIds=before.docs.filter(d=>d.data().ownerUid===uid&&d.data().date===day&&equipmentGroup(d.data().equipment)===equipmentGroup(equipment)).map(d=>d.id);
    const outcome=await runTransaction(db,async tx=>{
      const index=await tx.get(userDayRef);
