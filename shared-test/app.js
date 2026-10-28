@@ -1,7 +1,7 @@
-import { slotKeys, changeSlotTimes, orderForSlot } from './slot-order.mjs';
+import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, findOverlap, visibleAnchor } from './slot-order.mjs?v=20261028-overlap-week';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
-import { getFirestore, collection, addDoc, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
+import { getFirestore, collection, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, runTransaction, getDocsFromServer, arrayUnion } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 const firebaseApp=initializeApp({apiKey:'AIzaSyDn9Z_IBRag_p0DXL_LBS4sBYA7kgDOWsU',authDomain:'lab-bench-booking-test.firebaseapp.com',projectId:'lab-bench-booking-test',appId:'1:1043490879666:web:c34ae106322a04127a71ab'});
 const auth=getAuth(firebaseApp),db=getFirestore(firebaseApp),requestsRef=collection(db,'prototypeRequests');
 let sharedRequests=[],unsubscribe=null,unsubscribeProfile=null,profileName='',profileReady=false,editingId=null;
@@ -49,6 +49,40 @@ function openEdit(item){
 }
 function updateForm(){const fixed=form.elements.fixed.checked;document.querySelector('#fixedLabel').hidden=!fixed;form.elements.fixedTime.required=fixed;const duration=minutes(form.elements.end.value)-minutes(form.elements.start.value);const long=duration>=120;document.querySelector('#reasonLabel').hidden=!long;form.elements.reason.required=long}
 form.addEventListener('input',updateForm);
-form.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(form);const start=f.get('start'),end=f.get('end');const err=document.querySelector('#error');if(minutes(end)<=minutes(start)||minutes(start)%30||minutes(end)%30){err.textContent='開始・終了を30分単位で指定し、終了を開始より後にしてください。';return}if(f.get('fixed')&&(minutes(f.get('fixedTime'))<minutes(start)||minutes(f.get('fixedTime'))>=minutes(end))){err.textContent='指定時刻は希望時間の範囲内にしてください。';return}try{if(editingId){const ref=doc(db,'prototypeRequests',editingId);await runTransaction(db,async tx=>{const snap=await tx.get(ref);if(!snap.exists()||snap.data().cancelled||snap.data().ownerUid!==auth.currentUser.uid)throw new Error('対象の希望を変更できません');const current=snap.data();const slotTimes=changeSlotTimes(current,start,end,serverTimestamp);tx.update(ref,{start,end,slotTimes,activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim(),updatedAt:serverTimestamp()})})}else{await addDoc(requestsRef,{ownerUid:auth.currentUser.uid,name:displayName(),equipment:f.get('equipment'),date:f.get('date'),start,end,activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim(),cancelled:false,createdAt:serverTimestamp()})}dateInput.value=form.elements.date.value;formDialog.close();render()}catch(e){err.textContent='保存できませんでした：'+(e.code||e.message)}});
+form.addEventListener('submit',async e=>{
+ e.preventDefault();
+ const submit=document.querySelector('#formSubmit');
+ const f=new FormData(form),start=f.get('start'),end=f.get('end'),err=document.querySelector('#error');
+ if(minutes(end)<=minutes(start)||minutes(start)%30||minutes(end)%30){err.textContent='開始・終了を30分単位で指定し、終了を開始より後にしてください。';return}
+ if(f.get('fixed')&&(minutes(f.get('fixedTime'))<minutes(start)||minutes(f.get('fixedTime'))>=minutes(end))){err.textContent='指定時刻は希望時間の範囲内にしてください。';return}
+ if(!auth.currentUser){err.textContent='ログインしてから操作してください。';return}
+ const uid=auth.currentUser.uid,day=form.elements.date.value,equipment=form.elements.equipment.value,currentId=editingId;
+ const requestRef=currentId?doc(db,'prototypeRequests',currentId):doc(requestsRef);
+ const candidate={id:requestRef.id,ownerUid:uid,date:day,equipment,start,end};
+ const userDayRef=doc(db,'prototypeUserDays',`${uid}_${day}_${equipmentGroup(equipment)}`);
+ submit.disabled=true;err.textContent='';
+ try{
+   const before=await getDocsFromServer(requestsRef);
+   const legacyIds=before.docs.filter(d=>d.data().ownerUid===uid&&d.data().date===day&&equipmentGroup(d.data().equipment)===equipmentGroup(equipment)).map(d=>d.id);
+   await runTransaction(db,async tx=>{
+     const index=await tx.get(userDayRef);
+     const ids=[...new Set([...legacyIds,...(index.exists()?index.data().requestIds||[]:[]),...(currentId?[currentId]:[])])];
+     const records=await Promise.all(ids.map(id=>tx.get(doc(db,'prototypeRequests',id))));
+     const items=records.filter(d=>d.exists()).map(d=>({...d.data(),id:d.id}));
+     const clash=findOverlap(items,candidate);
+     if(clash)throw new Error(`この時間帯はご自身の希望（${clash.start}〜${clash.end}）と重なっています。既存の希望から「時間を変更」をご利用ください。`);
+     const payload={start,end,activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim()};
+     if(currentId){
+       const current=items.find(x=>x.id===currentId);
+       if(!current||current.cancelled||current.ownerUid!==uid||current.date!==day||current.equipment!==equipment)throw new Error('対象の希望を変更できません。');
+       tx.update(requestRef,{...payload,slotTimes:changeSlotTimes(current,start,end,serverTimestamp),updatedAt:serverTimestamp()});
+     }else{
+       tx.set(requestRef,{...payload,ownerUid:uid,name:displayName(),equipment,date:day,cancelled:false,createdAt:serverTimestamp()});
+     }
+     tx.set(userDayRef,{ownerUid:uid,date:day,group:equipmentGroup(equipment),requestIds:arrayUnion(requestRef.id),updatedAt:serverTimestamp()},{merge:true});
+   });
+   dateInput.value=visibleAnchor(dateInput.value,day,view);formDialog.close();render();
+ }catch(e){err.textContent=e.message||('保存できませんでした：'+e.code)}finally{submit.disabled=false}
+});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());document.querySelector('#detailAdd').onclick=()=>{const s=selected;detail.close();openForm(s.group,s.n,s.day)};document.querySelector('#new').onclick=()=>openForm();dateInput.onchange=render;document.querySelector('#today').onclick=()=>{dateInput.value=localDay(new Date());render()};function shift(days){const d=new Date(dateInput.value+'T12:00:00');d.setDate(d.getDate()+days);dateInput.value=localDay(d);render()}document.querySelector('#prev').onclick=()=>shift(view==='week'?-7:-1);document.querySelector('#next').onclick=()=>shift(view==='week'?7:1);for(const [id,mode] of [['weekView','week'],['dayView','day']])document.getElementById(id).onclick=()=>{view=mode;for(const [other,m] of [['weekView','week'],['dayView','day']]){const b=document.getElementById(other);b.classList.toggle('active',m===view);b.setAttribute('aria-pressed',String(m===view))}render()};render();
 

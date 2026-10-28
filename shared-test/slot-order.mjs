@@ -17,4 +17,18 @@ export function changeSlotTimes(request,start,end,newStamp) {
 export function orderForSlot(request,minute) {
   return request.slotTimes?.[String(minute)] || request.createdAt || null;
 }
+export function equipmentGroup(equipment) {
+  return ['either','one','two'].includes(equipment) ? 'culture' : equipment;
+}
+export function findOverlap(records, candidate) {
+  const from=toMinutes(candidate.start), to=toMinutes(candidate.end);
+  return records.find(r=>r.id!==candidate.id && !r.cancelled && r.ownerUid===candidate.ownerUid && r.date===candidate.date && equipmentGroup(r.equipment)===equipmentGroup(candidate.equipment) && toMinutes(r.start)<to && toMinutes(r.end)>from) || null;
+}
+export function visibleAnchor(anchor, target, view) {
+  if (view==='day') return target;
+  const d=new Date(anchor+'T12:00:00');
+  d.setDate(d.getDate()+7);
+  const end=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return target>=anchor && target<end ? anchor : target;
+}
 
