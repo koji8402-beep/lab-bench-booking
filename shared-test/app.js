@@ -40,10 +40,14 @@ function slotButton(group,n,day,compact=false){const list=requests(group,n,day);
 function render(){cards.innerHTML='';document.querySelector('#viewHelp').textContent=view==='week'?'選択日から７日間を表示します。横にスクロールし、枠を押すと詳細を確認できます。':'30分ごとの希望人数を表示します。枠を押すと詳細を確認できます。';for(const group of groups){const card=document.createElement('section');card.className='card';card.innerHTML=`<h3>${group.title}</h3><p>${group.desc}</p>`;if(view==='day'){const slots=document.createElement('div');slots.className='slots';for(let n=480;n<1140;n+=30)slots.append(slotButton(group,n,dateInput.value));card.append(slots)}else{const container=document.createElement('div');container.className='week-scroll';const grid=document.createElement('div');grid.className='week-grid';const days=getDays();grid.append(document.createElement('div'));days.forEach(d=>{const head=document.createElement('div');head.className='week-head';head.textContent=`${d.getMonth()+1}/${d.getDate()}（${'日月火水木金土'[d.getDay()]}）`;grid.append(head)});for(let n=480;n<1140;n+=30){const label=document.createElement('div');label.className='week-time';label.textContent=time(n);grid.append(label);days.forEach(d=>grid.append(slotButton(group,n,localDay(d),true)))}container.append(grid);card.append(container)}cards.append(card)}}
 function showDetail(group,n,day=dateInput.value){selected={group,n,day};document.querySelector('#detailTitle').textContent=`${day}　${time(n)}〜${time(n+30)}`;document.querySelector('#detailDesc').textContent=group.title+' · 利用希望の登録順';const list=requests(group,n,day);const target=document.querySelector('#detailList');target.innerHTML=list.length?list.map((x,i)=>`<div class="person"><strong>${i+1}番　${escapeHTML(x.ownerUid===auth.currentUser?.uid && profileReady && displayName()?displayName():x.name)}</strong>　${escapeHTML(equipmentNames[x.equipment])}${x.fixed?'　<span class="flag">⚑ '+escapeHTML(x.fixedTime)+'</span>':''}<small>${escapeHTML(x.start)}〜${escapeHTML(x.end)}${x.activity?' · '+escapeHTML(x.activity):''}${x.memo?' · '+escapeHTML(x.memo):''}${x.reason?' · 2時間以上の理由：'+escapeHTML(x.reason):''}</small><button type="button" data-edit="${escapeHTML(x.id)}">時間を変更</button>　<button type="button" data-remove="${escapeHTML(x.id)}">この試作データを取り消す</button></div>`).join(''):'<div class="empty">この時間帯の利用希望はありません。</div>';target.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{const item=get().find(x=>x.id===b.dataset.edit);if(!item)return;detail.close();openEdit(item)});target.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{if(confirm('この希望を全時間帯から取り消しますか？')){try{await updateDoc(doc(db,'prototypeRequests',b.dataset.remove),{cancelled:true,cancelledAt:serverTimestamp()});showDetailContent()}catch(e){alert('取消できませんでした：'+e.code)}}});if(!detail.open)detail.showModal()}
 function showDetailContent(){showDetail(selected.group,selected.n,selected.day)}
-function openForm(group,n,day=dateInput.value){if(!profileReady){alert('表示名を確認しています。しばらくしてからお試しください。');return}if(!displayName()){pendingForm={group,n,day};askName();return}editingId=null;form.reset();form.elements.equipment.disabled=false;form.elements.date.readOnly=false;document.querySelector('#formHeading').textContent='利用希望を追加';document.querySelector('#formSubmit').textContent='希望を登録';document.querySelector('#formName').textContent=displayName();form.elements.date.value=day;form.elements.start.value=time(n??600);form.elements.end.value=time((n??600)+30);form.elements.equipment.value=group?.items[0]||'either';document.querySelector('#error').textContent='';updateForm();formDialog.showModal()}
+function filterEquipmentOptions(group){
+ const allowed=group?.id==='culture'?['either','one','two','both']:group?.items;
+ for(const option of form.elements.equipment.options){const hide=!!allowed&&!allowed.includes(option.value);option.hidden=hide;option.disabled=hide}
+}
+function openForm(group,n,day=dateInput.value){if(!profileReady){alert('表示名を確認しています。しばらくしてからお試しください。');return}if(!displayName()){pendingForm={group,n,day};askName();return}editingId=null;form.reset();filterEquipmentOptions(group);form.elements.equipment.disabled=false;form.elements.date.readOnly=false;document.querySelector('#formHeading').textContent='利用希望を追加';document.querySelector('#formSubmit').textContent='希望を登録';document.querySelector('#formName').textContent=displayName();form.elements.date.value=day;form.elements.start.value=time(n??600);form.elements.end.value=time((n??600)+30);form.elements.equipment.value=group?.items[0]||'either';document.querySelector('#error').textContent='';updateForm();formDialog.showModal()}
 function openEdit(item){
  if(!profileReady||!displayName()){alert('表示名を先に設定してください。');return}
- editingId=item.id;form.reset();form.elements.equipment.value=item.equipment;form.elements.equipment.disabled=true;form.elements.date.value=item.date;form.elements.date.readOnly=true;
+ editingId=item.id;form.reset();filterEquipmentOptions(null);form.elements.equipment.value=item.equipment;form.elements.equipment.disabled=true;form.elements.date.value=item.date;form.elements.date.readOnly=true;
  for(const k of ['start','end','activity','fixedTime','memo','reason'])form.elements[k].value=item[k]||'';
  form.elements.fixed.checked=!!item.fixed;document.querySelector('#formHeading').textContent='利用希望の時間を変更';document.querySelector('#formSubmit').textContent='変更を保存';document.querySelector('#formName').textContent=displayName();document.querySelector('#error').textContent='';updateForm();formDialog.showModal();
 }
@@ -64,6 +68,12 @@ form.addEventListener('submit',async e=>{
  try{
    const before=await getDocsFromServer(requestsRef);
    const beforeItems=before.docs.map(d=>({...d.data(),id:d.id}));
+   const bothSpans=requestedBoth?['one','two'].flatMap(bench=>uncoveredIntervals(beforeItems,{...candidate,equipment:bench}).map(span=>({...span,equipment:bench}))):null;
+   const bothAdjusted=requestedBoth&&(['one','two'].some(bench=>{const spans=bothSpans.filter(span=>span.equipment===bench);return spans.length!==1||spans[0].start!==start||spans[0].end!==end}));
+   if(bothAdjusted){
+     const added=bothSpans.length?bothSpans.map(span=>`${equipmentNames[span.equipment]}　${span.start}〜${span.end}`).join('\n'):'追加される時間はありません';
+     if(!confirm('ご自身の既存の希望と重なるため、次の時間だけ追加します。\n\n'+added+'\n\n既存の希望と順位は変わりません。この内容で登録しますか？\n「キャンセル」で入力画面に戻ります。'))return;
+   }
    const opposite=oppositeBenchOverlaps(beforeItems,candidate);
    let bothReason='';
    if(requestedBoth||opposite.length){
@@ -79,6 +89,7 @@ form.addEventListener('submit',async e=>{
      const ids=[...new Set([...legacyIds,...(index.exists()?index.data().requestIds||[]:[]),...(currentId?[currentId]:[])])];
      const records=await Promise.all(ids.map(id=>tx.get(doc(db,'prototypeRequests',id))));
      const items=records.filter(d=>d.exists()).map(d=>({...d.data(),id:d.id}));
+     if(requestedBoth){const latest=['one','two'].flatMap(bench=>uncoveredIntervals(items,{...candidate,equipment:bench}).map(span=>({...span,equipment:bench})));if(JSON.stringify(latest)!==JSON.stringify(bothSpans))throw new Error('希望の状況が変わりました。もう一度登録して内容を確認してください。')}
      if(!requestedBoth&&oppositeBenchOverlaps(items,candidate).length&&!bothReason)throw new Error('別端末で①または②の希望が追加されました。もう一度保存し、両方を希望する理由を入力してください。');
      const intervals=uncoveredIntervals(items,candidate);
      const memo=f.get('memo').trim();
