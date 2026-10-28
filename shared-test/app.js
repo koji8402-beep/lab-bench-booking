@@ -1,4 +1,4 @@
-import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, findOverlap, visibleAnchor } from './slot-order.mjs?v=20261028-overlap-week';
+import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, findOverlap, uncoveredIntervals, visibleAnchor } from './slot-order.mjs?v=20261028-auto-trim';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import { getFirestore, collection, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, runTransaction, getDocsFromServer, arrayUnion } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
@@ -64,25 +64,41 @@ form.addEventListener('submit',async e=>{
  try{
    const before=await getDocsFromServer(requestsRef);
    const legacyIds=before.docs.filter(d=>d.data().ownerUid===uid&&d.data().date===day&&equipmentGroup(d.data().equipment)===equipmentGroup(equipment)).map(d=>d.id);
-   await runTransaction(db,async tx=>{
+   const outcome=await runTransaction(db,async tx=>{
      const index=await tx.get(userDayRef);
      const ids=[...new Set([...legacyIds,...(index.exists()?index.data().requestIds||[]:[]),...(currentId?[currentId]:[])])];
      const records=await Promise.all(ids.map(id=>tx.get(doc(db,'prototypeRequests',id))));
      const items=records.filter(d=>d.exists()).map(d=>({...d.data(),id:d.id}));
-     const clash=findOverlap(items,candidate);
-     if(clash)throw new Error(`この時間帯はご自身の希望（${clash.start}〜${clash.end}）と重なっています。既存の希望から「時間を変更」をご利用ください。`);
-     const payload={start,end,activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim()};
+     const intervals=uncoveredIntervals(items,candidate);
+     const payload={activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim()};
+     const adjusted=intervals.length!==1||intervals[0].start!==start||intervals[0].end!==end;
      if(currentId){
        const current=items.find(x=>x.id===currentId);
        if(!current||current.cancelled||current.ownerUid!==uid||current.date!==day||current.equipment!==equipment)throw new Error('対象の希望を変更できません。');
-       tx.update(requestRef,{...payload,slotTimes:changeSlotTimes(current,start,end,serverTimestamp),updatedAt:serverTimestamp()});
-     }else{
-       tx.set(requestRef,{...payload,ownerUid:uid,name:displayName(),equipment,date:day,cancelled:false,createdAt:serverTimestamp()});
+       if(findOverlap(items,{...candidate,start:current.start,end:current.end}))throw new Error('既存の希望同士が重複しているため、自動変更できません。先に不要な希望を取り消してください。');
+       if(intervals.length===0)return {kind:'covered',intervals:[]};
+       const refs=intervals.map((_,i)=>i===0?requestRef:doc(requestsRef));
+       for(let i=0;i<intervals.length;i++){
+         const span=intervals[i],hasFixed=payload.fixed&&minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end);
+         const data={...payload,...span,fixed:hasFixed,fixedTime:hasFixed?payload.fixedTime:'',slotTimes:changeSlotTimes(current,span.start,span.end,serverTimestamp)};
+         if(i===0)tx.update(refs[i],{...data,updatedAt:serverTimestamp()});
+         else tx.set(refs[i],{...data,ownerUid:uid,name:current.name,equipment,date:day,cancelled:false,createdAt:serverTimestamp()});
+       }
+       tx.set(userDayRef,{ownerUid:uid,date:day,group:equipmentGroup(equipment),requestIds:arrayUnion(...refs.map(ref=>ref.id)),updatedAt:serverTimestamp()},{merge:true});
+       return {kind:'edited',intervals,adjusted,fixedOmitted:payload.fixed&&!intervals.some(span=>minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end))};
      }
-     tx.set(userDayRef,{ownerUid:uid,date:day,group:equipmentGroup(equipment),requestIds:arrayUnion(requestRef.id),updatedAt:serverTimestamp()},{merge:true});
+     if(intervals.length===0)return {kind:'covered',intervals:[],fixedOmitted:payload.fixed};
+     const refs=intervals.map((_,i)=>i===0?requestRef:doc(requestsRef));
+     for(let i=0;i<intervals.length;i++){
+       const span=intervals[i],hasFixed=payload.fixed&&minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end);
+       tx.set(refs[i],{...payload,...span,fixed:hasFixed,fixedTime:hasFixed?payload.fixedTime:'',ownerUid:uid,name:displayName(),equipment,date:day,cancelled:false,createdAt:serverTimestamp()});
+     }
+     tx.set(userDayRef,{ownerUid:uid,date:day,group:equipmentGroup(equipment),requestIds:arrayUnion(...refs.map(ref=>ref.id)),updatedAt:serverTimestamp()},{merge:true});
+     return {kind:'added',intervals,adjusted,fixedOmitted:payload.fixed&&!intervals.some(span=>minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end))};
    });
    dateInput.value=visibleAnchor(dateInput.value,day,view);formDialog.close();render();
+   if(outcome.kind==='covered')alert('指定された時間は、ご自身の別の利用希望ですべて登録済みです。新たな登録・変更はありません。'+(outcome.fixedOmitted?' 時刻指定は既存の希望には反映されません。':''));
+   else if(outcome.adjusted||outcome.fixedOmitted)alert('重複する時間を除いて'+(outcome.kind==='edited'?'変更':'登録')+'しました：'+outcome.intervals.map(v=>v.start+'〜'+v.end).join('、')+(outcome.fixedOmitted?'。指定時刻は既存の希望に含まれるため、新たな時刻指定は反映されていません。':''));
  }catch(e){err.textContent=e.message||('保存できませんでした：'+e.code)}finally{submit.disabled=false}
 });
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());document.querySelector('#detailAdd').onclick=()=>{const s=selected;detail.close();openForm(s.group,s.n,s.day)};document.querySelector('#new').onclick=()=>openForm();dateInput.onchange=render;document.querySelector('#today').onclick=()=>{dateInput.value=localDay(new Date());render()};function shift(days){const d=new Date(dateInput.value+'T12:00:00');d.setDate(d.getDate()+days);dateInput.value=localDay(d);render()}document.querySelector('#prev').onclick=()=>shift(view==='week'?-7:-1);document.querySelector('#next').onclick=()=>shift(view==='week'?7:1);for(const [id,mode] of [['weekView','week'],['dayView','day']])document.getElementById(id).onclick=()=>{view=mode;for(const [other,m] of [['weekView','week'],['dayView','day']]){const b=document.getElementById(other);b.classList.toggle('active',m===view);b.setAttribute('aria-pressed',String(m===view))}render()};render();
-

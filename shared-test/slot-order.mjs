@@ -24,6 +24,20 @@ export function findOverlap(records, candidate) {
   const from=toMinutes(candidate.start), to=toMinutes(candidate.end);
   return records.find(r=>r.id!==candidate.id && !r.cancelled && r.ownerUid===candidate.ownerUid && r.date===candidate.date && equipmentGroup(r.equipment)===equipmentGroup(candidate.equipment) && toMinutes(r.start)<to && toMinutes(r.end)>from) || null;
 }
+export function uncoveredIntervals(records,candidate) {
+  const start=toMinutes(candidate.start),end=toMinutes(candidate.end);
+  let intervals=[[start,end]];
+  for(const r of records) {
+    if(r.id===candidate.id||r.cancelled||r.ownerUid!==candidate.ownerUid||r.date!==candidate.date||equipmentGroup(r.equipment)!==equipmentGroup(candidate.equipment))continue;
+    const a=toMinutes(r.start),b=toMinutes(r.end);
+    intervals=intervals.flatMap(([left,right])=>{
+      if(b<=left||a>=right)return [[left,right]];
+      const remain=[];if(a>left)remain.push([left,Math.min(a,right)]);if(b<right)remain.push([Math.max(b,left),right]);return remain;
+    });
+  }
+  const format=n=>`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
+  return intervals.map(([a,b])=>({start:format(a),end:format(b)}));
+}
 export function visibleAnchor(anchor, target, view) {
   if (view==='day') return target;
   const d=new Date(anchor+'T12:00:00');
@@ -31,4 +45,3 @@ export function visibleAnchor(anchor, target, view) {
   const end=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   return target>=anchor && target<end ? anchor : target;
 }
-
