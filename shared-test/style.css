@@ -3,3 +3,4 @@
 .profile{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:16px;color:#496359;font-size:13px}.profile button{border:1px solid #d1dfd5;background:white;color:#246b58;border-radius:8px;padding:7px 10px;cursor:pointer}#nameError{color:#a4332b;font-size:13px}
 .week-grid>.week-time{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 4px #173b2810}.week-grid>div:first-child{position:sticky;left:0;z-index:3;background:#fff}
 [hidden]{display:none!important}
+.slot.mine,.week-grid .slot.mine{background:#dceefa;border-color:#5796c6;box-shadow:inset 0 0 0 1px #5796c6}.slot.mine span:not(.flag){color:#244d6c}.legend-mine{display:inline-flex;align-items:center;gap:5px}.legend-mine::before{content:'';width:13px;height:13px;border:1px solid #5796c6;border-radius:3px;background:#dceefa}
