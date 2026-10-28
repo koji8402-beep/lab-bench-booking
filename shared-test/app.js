@@ -1,4 +1,4 @@
-import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, sameReservationEquipment, findOverlap, uncoveredIntervals, visibleAnchor } from './slot-order.mjs?v=20261028-equipment-confirm';
+import { slotKeys, changeSlotTimes, orderForSlot, equipmentGroup, sameReservationEquipment, oppositeBenchOverlaps, findOverlap, uncoveredIntervals, visibleAnchor } from './slot-order.mjs?v=20261028-both-benches';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import { getFirestore, collection, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, runTransaction, getDocsFromServer, arrayUnion } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
@@ -36,7 +36,7 @@ const groups=[{id:'culture',title:'細胞培養用 ①・②',desc:'どちらで
 dateInput.value=localDay(new Date());
 function requests(group,slot,day=dateInput.value){return get().filter(x=>x.date===day&&group.items.includes(x.equipment)&&minutes(x.start)<slot+30&&minutes(x.end)>slot).sort((a,b)=>{const av=orderForSlot(a,slot)?.toMillis?.()??Number.MAX_SAFE_INTEGER;const bv=orderForSlot(b,slot)?.toMillis?.()??Number.MAX_SAFE_INTEGER;return av-bv || a.id.localeCompare(b.id)})}
 function getDays(){const d=new Date(dateInput.value+'T12:00:00');return Array.from({length:7},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return x})}
-function slotButton(group,n,day,compact=false){const list=requests(group,n,day);const fixed=list.some(x=>x.fixed&&minutes(x.fixedTime)>=n&&minutes(x.fixedTime)<n+30);const mine=!!auth.currentUser&&list.some(x=>x.ownerUid===auth.currentUser.uid);const button=document.createElement('button');button.className='slot '+(list.length>=3?'full':list.length?'busy':'')+(mine?' mine':'');button.innerHTML=compact?`<span>${list.length?list.length+'人':'−'}</span>${fixed?' <span class="flag">⚑</span>':''}`:`<strong>${time(n)}〜</strong><span>${list.length?'希望 '+list.length+'人':'希望なし'}</span>${fixed?' <span class="flag">⚑</span>':''}`;button.setAttribute('aria-label',`${day} ${time(n)} ${list.length}人${fixed?' 時刻指定あり':''}${mine?' 自分の希望あり':''}`);button.onclick=()=>showDetail(group,n,day);return button}
+function slotButton(group,n,day,compact=false){const list=requests(group,n,day);const count=new Set(list.map(x=>x.ownerUid)).size;const fixed=list.some(x=>x.fixed&&minutes(x.fixedTime)>=n&&minutes(x.fixedTime)<n+30);const mine=!!auth.currentUser&&list.some(x=>x.ownerUid===auth.currentUser.uid);const button=document.createElement('button');button.className='slot '+(count>=3?'full':count?'busy':'')+(mine?' mine':'');button.innerHTML=compact?`<span>${count?count+'人':'−'}</span>${fixed?' <span class="flag">⚑</span>':''}`:`<strong>${time(n)}〜</strong><span>${count?'希望 '+count+'人':'希望なし'}</span>${fixed?' <span class="flag">⚑</span>':''}`;button.setAttribute('aria-label',`${day} ${time(n)} ${count}人${fixed?' 時刻指定あり':''}${mine?' 自分の希望あり':''}`);button.onclick=()=>showDetail(group,n,day);return button}
 function render(){cards.innerHTML='';document.querySelector('#viewHelp').textContent=view==='week'?'選択日から７日間を表示します。横にスクロールし、枠を押すと詳細を確認できます。':'30分ごとの希望人数を表示します。枠を押すと詳細を確認できます。';for(const group of groups){const card=document.createElement('section');card.className='card';card.innerHTML=`<h3>${group.title}</h3><p>${group.desc}</p>`;if(view==='day'){const slots=document.createElement('div');slots.className='slots';for(let n=480;n<1140;n+=30)slots.append(slotButton(group,n,dateInput.value));card.append(slots)}else{const container=document.createElement('div');container.className='week-scroll';const grid=document.createElement('div');grid.className='week-grid';const days=getDays();grid.append(document.createElement('div'));days.forEach(d=>{const head=document.createElement('div');head.className='week-head';head.textContent=`${d.getMonth()+1}/${d.getDate()}（${'日月火水木金土'[d.getDay()]}）`;grid.append(head)});for(let n=480;n<1140;n+=30){const label=document.createElement('div');label.className='week-time';label.textContent=time(n);grid.append(label);days.forEach(d=>grid.append(slotButton(group,n,localDay(d),true)))}container.append(grid);card.append(container)}cards.append(card)}}
 function showDetail(group,n,day=dateInput.value){selected={group,n,day};document.querySelector('#detailTitle').textContent=`${day}　${time(n)}〜${time(n+30)}`;document.querySelector('#detailDesc').textContent=group.title+' · 利用希望の登録順';const list=requests(group,n,day);const target=document.querySelector('#detailList');target.innerHTML=list.length?list.map((x,i)=>`<div class="person"><strong>${i+1}番　${escapeHTML(x.ownerUid===auth.currentUser?.uid && profileReady && displayName()?displayName():x.name)}</strong>　${escapeHTML(equipmentNames[x.equipment])}${x.fixed?'　<span class="flag">⚑ '+escapeHTML(x.fixedTime)+'</span>':''}<small>${escapeHTML(x.start)}〜${escapeHTML(x.end)}${x.activity?' · '+escapeHTML(x.activity):''}${x.memo?' · '+escapeHTML(x.memo):''}${x.reason?' · 2時間以上の理由：'+escapeHTML(x.reason):''}</small><button type="button" data-edit="${escapeHTML(x.id)}">時間を変更</button>　<button type="button" data-remove="${escapeHTML(x.id)}">この試作データを取り消す</button></div>`).join(''):'<div class="empty">この時間帯の利用希望はありません。</div>';target.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{const item=get().find(x=>x.id===b.dataset.edit);if(!item)return;detail.close();openEdit(item)});target.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{if(confirm('この希望を全時間帯から取り消しますか？')){try{await updateDoc(doc(db,'prototypeRequests',b.dataset.remove),{cancelled:true,cancelledAt:serverTimestamp()});showDetailContent()}catch(e){alert('取消できませんでした：'+e.code)}}});if(!detail.open)detail.showModal()}
 function showDetailContent(){showDetail(selected.group,selected.n,selected.day)}
@@ -56,14 +56,22 @@ form.addEventListener('submit',async e=>{
  if(minutes(end)<=minutes(start)||minutes(start)%30||minutes(end)%30){err.textContent='開始・終了を30分単位で指定し、終了を開始より後にしてください。';return}
  if(f.get('fixed')&&(minutes(f.get('fixedTime'))<minutes(start)||minutes(f.get('fixedTime'))>=minutes(end))){err.textContent='指定時刻は希望時間の範囲内にしてください。';return}
  if(!auth.currentUser){err.textContent='ログインしてから操作してください。';return}
- const uid=auth.currentUser.uid,day=form.elements.date.value,equipment=form.elements.equipment.value,currentId=editingId;
+ const uid=auth.currentUser.uid,day=form.elements.date.value,requestedBoth=form.elements.equipment.value==='both',equipment=requestedBoth?'one':form.elements.equipment.value,currentId=editingId;
  const requestRef=currentId?doc(db,'prototypeRequests',currentId):doc(requestsRef);
  const candidate={id:requestRef.id,ownerUid:uid,date:day,equipment,start,end};
  const userDayRef=doc(db,'prototypeUserDays',`${uid}_${day}_${equipmentGroup(equipment)}`);
  submit.disabled=true;err.textContent='';
  try{
    const before=await getDocsFromServer(requestsRef);
-   const otherEquipment=before.docs.map(d=>({...d.data(),id:d.id})).filter(r=>r.id!==currentId&&!r.cancelled&&r.ownerUid===uid&&r.date===day&&!sameReservationEquipment(r.equipment,equipment)&&minutes(r.start)<minutes(end)&&minutes(r.end)>minutes(start));
+   const beforeItems=before.docs.map(d=>({...d.data(),id:d.id}));
+   const opposite=oppositeBenchOverlaps(beforeItems,candidate);
+   let bothReason='';
+   if(requestedBoth||opposite.length){
+     const answer=prompt((requestedBoth?'①と②を同時に希望します。':'同じ時間帯に'+equipmentNames[opposite[0].equipment]+'の希望があります。')+'\n両方を希望する理由を入力してください（他の利用者にも表示されます）。');
+     if(answer===null)return;
+     bothReason=answer.trim();if(!bothReason){err.textContent='①と②を同時に希望する理由を入力してください。';return}
+   }
+   const otherEquipment=beforeItems.filter(r=>r.id!==currentId&&!r.cancelled&&r.ownerUid===uid&&r.date===day&&!sameReservationEquipment(r.equipment,equipment)&&!opposite.some(x=>x.id===r.id)&&!(requestedBoth&&r.equipment==='two')&&minutes(r.start)<minutes(end)&&minutes(r.end)>minutes(start));
    if(otherEquipment.length&&!confirm('同じ時間帯に、別の設備の利用希望があります。\n'+otherEquipment.map(r=>`${equipmentNames[r.equipment]||r.equipment}　${r.start}〜${r.end}`).join('\n')+'\n\nこのまま'+(currentId?'変更':'登録')+'しますか？'))return;
    const legacyIds=before.docs.filter(d=>d.data().ownerUid===uid&&d.data().date===day&&equipmentGroup(d.data().equipment)===equipmentGroup(equipment)).map(d=>d.id);
    const outcome=await runTransaction(db,async tx=>{
@@ -71,8 +79,21 @@ form.addEventListener('submit',async e=>{
      const ids=[...new Set([...legacyIds,...(index.exists()?index.data().requestIds||[]:[]),...(currentId?[currentId]:[])])];
      const records=await Promise.all(ids.map(id=>tx.get(doc(db,'prototypeRequests',id))));
      const items=records.filter(d=>d.exists()).map(d=>({...d.data(),id:d.id}));
+     if(!requestedBoth&&oppositeBenchOverlaps(items,candidate).length&&!bothReason)throw new Error('別端末で①または②の希望が追加されました。もう一度保存し、両方を希望する理由を入力してください。');
      const intervals=uncoveredIntervals(items,candidate);
-     const payload={activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:f.get('memo').trim(),reason:f.get('reason').trim()};
+     const memo=f.get('memo').trim();
+     const payload={activity:f.get('activity'),fixed:!!f.get('fixed'),fixedTime:f.get('fixedTime'),memo:[memo,bothReason?'①と②を同時に希望する理由：'+bothReason:''].filter(Boolean).join('\n'),reason:f.get('reason').trim()};
+     if(requestedBoth){
+       const spans=['one','two'].flatMap(bench=>uncoveredIntervals(items,{...candidate,equipment:bench}).map(span=>({...span,equipment:bench})));
+       if(!spans.length)return {kind:'covered',intervals:[]};
+       const refs=spans.map(()=>doc(requestsRef));
+       for(let i=0;i<spans.length;i++){
+         const span=spans[i],hasFixed=payload.fixed&&minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end);
+         tx.set(refs[i],{...payload,...span,fixed:hasFixed,fixedTime:hasFixed?payload.fixedTime:'',ownerUid:uid,name:displayName(),date:day,cancelled:false,createdAt:serverTimestamp()});
+       }
+       tx.set(userDayRef,{ownerUid:uid,date:day,group:equipmentGroup(equipment),requestIds:arrayUnion(...refs.map(ref=>ref.id)),updatedAt:serverTimestamp()},{merge:true});
+       return {kind:'both',intervals:spans,fixedOmitted:payload.fixed&&!spans.some(span=>minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end))};
+     }
      const adjusted=intervals.length!==1||intervals[0].start!==start||intervals[0].end!==end;
      if(currentId){
        const current=items.find(x=>x.id===currentId);
@@ -99,7 +120,8 @@ form.addEventListener('submit',async e=>{
      return {kind:'added',intervals,adjusted,fixedOmitted:payload.fixed&&!intervals.some(span=>minutes(payload.fixedTime)>=minutes(span.start)&&minutes(payload.fixedTime)<minutes(span.end))};
    });
    dateInput.value=visibleAnchor(dateInput.value,day,view);formDialog.close();render();
-   if(outcome.kind==='covered')alert('指定された時間は、ご自身の別の利用希望ですべて登録済みです。新たな登録・変更はありません。'+(outcome.fixedOmitted?' 時刻指定は既存の希望には反映されません。':''));
+   if(outcome.kind==='both')alert('登録した時間：\n'+outcome.intervals.map(v=>equipmentNames[v.equipment]+'　'+v.start+'〜'+v.end).join('\n')+'\n既存の希望と重なる時間は追加していません。'+(outcome.fixedOmitted?' 指定時刻は新たな希望に含まれず、既存の希望には反映されません。':''));
+   else if(outcome.kind==='covered')alert('指定された時間は、ご自身の別の利用希望ですべて登録済みです。新たな登録・変更はありません。'+(outcome.fixedOmitted?' 時刻指定は既存の希望には反映されません。':''));
    else if(outcome.adjusted||outcome.fixedOmitted)alert('重複する時間を除いて'+(outcome.kind==='edited'?'変更':'登録')+'しました：'+outcome.intervals.map(v=>v.start+'〜'+v.end).join('、')+(outcome.fixedOmitted?'。指定時刻は既存の希望に含まれるため、新たな時刻指定は反映されていません。':''));
  }catch(e){err.textContent=e.message||('保存できませんでした：'+e.code)}finally{submit.disabled=false}
 });

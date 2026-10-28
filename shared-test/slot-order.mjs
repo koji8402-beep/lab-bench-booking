@@ -23,6 +23,12 @@ export function equipmentGroup(equipment) {
 export function sameReservationEquipment(a,b) {
   return a===b || (equipmentGroup(a)==='culture' && equipmentGroup(b)==='culture' && (a==='either'||b==='either'));
 }
+export function oppositeBenchOverlaps(records,candidate) {
+  const opposite=candidate.equipment==='one'?'two':candidate.equipment==='two'?'one':null;
+  if(!opposite)return [];
+  const from=toMinutes(candidate.start),to=toMinutes(candidate.end);
+  return records.filter(r=>r.id!==candidate.id&&!r.cancelled&&r.ownerUid===candidate.ownerUid&&r.date===candidate.date&&r.equipment===opposite&&toMinutes(r.start)<to&&toMinutes(r.end)>from);
+}
 export function findOverlap(records, candidate) {
   const from=toMinutes(candidate.start), to=toMinutes(candidate.end);
   return records.find(r=>r.id!==candidate.id && !r.cancelled && r.ownerUid===candidate.ownerUid && r.date===candidate.date && sameReservationEquipment(r.equipment,candidate.equipment) && toMinutes(r.start)<to && toMinutes(r.end)>from) || null;
