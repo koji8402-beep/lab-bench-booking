@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>復元後のログイン確認</title><style>body{font-family:system-ui,sans-serif;background:#f4f7f5;color:#203431;margin:0;padding:24px}main{max-width:540px;margin:40px auto;background:white;padding:24px;border-radius:14px}button{background:#246b58;color:white;border:0;border-radius:8px;padding:12px 16px;font-size:16px}p{line-height:1.7}</style></head>
+<body><main><h1>復元後のログイン確認</h1><p>復元試験専用の画面です。普段の予約データには接続しません。</p><button id="signIn" type="button">Googleでログイン</button><p id="status">ログインして確認してください。</p><p>パスワードや認証コードを他の人に伝える必要はありません。</p></main>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+const app=initializeApp({apiKey:'AIzaSyCSxj8vpxGhAct2i4eQv6MNRb-A4rk_zA8',authDomain:'lab-bench-restore-8402.firebaseapp.com',projectId:'lab-bench-restore-8402',appId:'1:430242380588:web:d65717f7024506628bca89'});
+const auth=getAuth(app),status=document.querySelector('#status'),button=document.querySelector('#signIn');
+button.onclick=async()=>{try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){status.textContent='ログインできませんでした：'+(e.code||e.message)}};
+onAuthStateChanged(auth,user=>{if(user){status.textContent='Googleログインに成功しました。担当者にお知らせください。';button.hidden=true}});
+</script></body></html>
